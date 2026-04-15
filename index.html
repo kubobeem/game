@@ -402,4 +402,89 @@ const next = (currentLevel + 1) % stageData.length;
  document.getElementById('close-menu').onclick = () => document.getElementById('menu-modal').classList.remove('active');
  document.getElementById('random-mode-toggle').onclick = loadRandomStage;
 
- window.addEventListener('resize
+ window.addEventListener('resize', handleResize);
+}
+
+function getMousePos(e) {
+  const rect = render.canvas.getBoundingClientRect();
+  const scaleX = CONFIG.width / rect.width;
+  const scaleY = CONFIG.height / rect.height;
+  return {
+    x: (e.clientX - rect.left) * scaleX,
+    y: (e.clientY - rect.top) * scaleY
+  };
+}
+
+function finishDrawing() {
+  isDrawing = false;
+  if (currentPath.length < 2) { currentPath = []; return; }
+
+  const segments = [];
+  for (let i = 0; i < currentPath.length - 1; i++) {
+    const a = currentPath[i];
+    const b = currentPath[i + 1];
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx);
+    if (len > 1) {
+      segments.push(Bodies.rectangle(mx, my, len, 10, {
+        isStatic: true,
+        angle: angle,
+        render: { fillStyle: CONFIG.colors.ink },
+        label: 'drawn',
+        friction: 0.3,
+        restitution: 0.3
+      }));
+    }
+  }
+
+  if (segments.length > 0) {
+    Composite.add(engine.world, segments);
+    totalLinesDrawn++;
+    updateLineCount();
+  }
+  currentPath = [];
+}
+
+function updateLineCount() {
+  document.getElementById('line-count').innerText = totalLinesDrawn;
+}
+
+function onWin() {
+  if (isClearing) return;
+  isClearing = true;
+  document.getElementById('win-modal').classList.add('active');
+}
+
+function handleResize() {
+  const container = document.getElementById('game-container');
+  const canvas = render.canvas;
+  const maxW = container.clientWidth * 0.95;
+  const maxH = container.clientHeight * 0.85;
+  const scale = Math.min(maxW / CONFIG.width, maxH / CONFIG.height, 1);
+  canvas.style.width = (CONFIG.width * scale) + 'px';
+  canvas.style.height = (CONFIG.height * scale) + 'px';
+}
+
+function createStageGrid() {
+  const grid = document.getElementById('stage-grid');
+  stageData.forEach((stage, i) => {
+    const btn = document.createElement('button');
+    btn.innerText = i + 1;
+    btn.title = stage.name;
+    btn.className = 'aspect-square rounded-xl font-bold text-sm transition hover:bg-blue-100 hover:text-blue-700 border border-gray-200 p-1';
+    btn.onclick = () => {
+      loadStage(i);
+      document.getElementById('menu-modal').classList.remove('active');
+    };
+    grid.appendChild(btn);
+  });
+}
+
+init();
+</script>
+</body>
+</html>
