@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>青と赤のたま：エボリューション（50ステージ版）</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<style>
+html, body {
+margin: 0;
+padding: 0;
+width: 100%;
+height: 100%;
+overflow: hidden;
+background: #eef2f6;
+touch-action: none;
+user-select: none;
+font-family: 'Segoe UI', system-ui, sans-serif;
+}
+#game-container {
+position: relative;
+width: 100vw;
+height: 100vh;
+display: flex;
+justify-content: center;
+align-items: center;
+}
+canvas {
+display: block;
+background: #ffffff;
+box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+border-radius: 16px;
+max-width: 95vw;
+max-height: 80vh;
+object-fit: contain;
+}
+.ui-panel {
+pointer-events: auto;
+background: rgba(255, 255, 255, 0.9);
+backdrop-filter: blur(8px);
+}
+.modal {
+display: none;
+position: absolute;
+top: 50%;
+left: 50%;
+transform: translate(-50%, -50%);
+z-index: 50;
+}
+.modal.active { display: block; }
+.star { color: #fbbf24; font-size: 2rem; }
+#toast {
+position: absolute;
+bottom: 100px;
+left: 50%;
+transform: translateX(-50%);
+background: rgba(0, 0, 0, 0.7);
+color: white;
+padding: 12px 24px;
+border-radius: 99px;
+font-weight: bold;
+opacity: 0;
+transition: opacity 0.3s;
+pointer-events: none;
+white-space: nowrap;
+}
+
+/* ステージ選択グリッド用スクロール */
+#menu-modal {
+max-height: 80vh;
+display: none; /* 初期状態は非表示、activeクラスでflexにする */
+flex-direction: column;
+}
+#menu-modal.active {
+display: flex;
+}
+#stage-grid-container {
+overflow-y: auto;
+flex-grow: 1;
+padding-right: 8px; /* スクロールバー用の余白 */
+margin-bottom: 16px;
+}
+/* スクロールバーのカスタマイズ */
+#stage-grid-container::-webkit-scrollbar {
+width: 6px;
+}
+#stage-grid-container::-webkit-scrollbar-thumb {
+background-color: #cbd5e1;
+border-radius: 3px;
+}
+</style>
+</head>
+<body>
+<div id="game-container">
+<!-- UI Overlay -->
+<div class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 sm:p-6">
+<div class="flex flex-col gap-3 items-center sm:items-stretch">
+<div class="flex flex-wrap justify-between items-center w-full max-w-4xl mx-auto gap-4">
+<div class="ui-panel px-6 py-3 rounded-2xl shadow-sm flex flex-col sm:flex-row items-center gap-2 sm:gap-6">
+<div class="text-gray-700 font-bold whitespace-nowrap">
+ Stage <span id="stage-num">1</span>: <span id="stage-name" class="text-blue-600">Loading...</span>
+</div>
+<div class="hidden sm:block h-6 w-px bg-gray-300"></div>
+<div class="text-gray-500 font-bold whitespace-nowrap">
+ 描いた線: <span id="line-count" class="text-gray-800">0</span>
+</div>
+</div>
+<div class="flex gap-2">
+<button id="reset-btn" class="ui-panel p-3 rounded-xl shadow-sm hover:bg-gray-50 transition active:scale-95" title="やり直し">
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+</button>
+<button id="menu-btn" class="ui-panel p-3 rounded-xl shadow-sm hover:bg-gray-50 transition" title="メニュー">
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
+</button>
+</div>
+</div>
+</div>
+
+<div class="text-center text-gray-400 text-sm font-medium">
+ 画面外にボールが出ると自動でリセットされます。
+</div>
+</div>
+
+<!-- トースト通知 -->
+<div id="toast">画面外に出ました！</div>
+
+<!-- クリアモーダル -->
+<div id="win-modal" class="modal w-80 ui-panel p-8 rounded-3xl shadow-2xl text-center border border-white">
+<h2 class="text-3xl font-black text-gray-800 mb-2">Clear!</h2>
+<div class="flex justify-center gap-1 mb-6">
+<span class="star">★</span><span class="star">★</span><span class="star">★</span>
+</div>
+<button id="next-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-200 transition-all transform hover:-translate-y-1">
+ Next Stage
+</button>
+</div>
+
+<!-- メニューモーダル -->
+<div id="menu-modal" class="modal w-80 sm:w-96 ui-panel p-6 rounded-3xl shadow-2xl">
+<h3 class="font-bold text-gray-500 mb-4 uppercase tracking-widest text-xs">Stage Selection (1-50)</h3>
+<div id="stage-grid-container">
+<div id="stage-grid" class="grid grid-cols-5 gap-2"></div>
+</div>
+<div class="mt-auto pt-4 border-t border-gray-200">
+<button id="random-mode-toggle" class="w-full py-3 rounded-xl border-2 border-dashed border-gray-300 text-gray-500 font-bold hover:bg-gray-50 transition mb-2">
+ Random Infinite Mode
+</button>
+<button id="close-menu" class="w-full text-gray-400 font-bold text-sm py-2 hover:bg-gray-100 rounded-lg transition">Close</button>
+</div>
+</div>
+</div>
+
+<script>
+const { Engine, Render, Runner, Bodies, Body, Composite, Events, Vector } = Matter;
+
+const CONFIG = {
+ width: 800,
+ height: 600,
+ ballRadius: 22,
+ bounds: { minX: -100, maxX: 900, maxY: 750 },
+ colors: { blue: '#3b82f6', red: '#ef4444', wall: '#cbd5e1', ink: '#475569' }
+};
+
+let engine, render, runner;
+let currentLevel = 0;
+let totalLinesDrawn = 0;
+let isDrawing = false;
+let currentPath = [];
+let isClearing = false;
+let mode = 'normal';
+let blueBall, redBall;
+
+// ヘルパー関数群（ステージデータ用）
+const createBall = (x, y, type) => Bodies.circle(x, y, CONFIG.ballRadius, {
+ label: type === 'blue' ? 'blueBall' : 'redBall', restitution: 0.5, friction: 0.1, density: 0.04,
+ render: { fillStyle: CONFIG.colors[type], strokeStyle: '#111', lineWidth: 2 }
+});
+// 角度(angle)を指定できる壁生成
+const createWall = (x, y, w, h, angle = 0) => Bodies.rectangle(x, y, w, h, {
+ isStatic: true, angle: angle, render: { fillStyle: CONFIG.colors.wall }
+});
+
+// --- 50ステージデータ ---
+const stageData = [
+// 1-10: 導入〜基本
+{ name: "ゆるい坂で転がす", build: () => [createWall(400, 500, 700, 30, 0.05), blueBall = createBall(200, 350, 'blue'), redBall = createBall(600, 350, 'red')] },
+{ name: "逆向きの坂で戻す", build: () => [createWall(200, 450, 350, 20, 0.1), createWall(600, 450, 350, 20, -0.1), blueBall = createBall(150, 300, 'blue'), redBall = createBall(650, 300, 'red')] },
+{ name: "真ん中に細い壁", build: () => [createWall(400, 550, 800, 30), createWall(400, 450, 20, 150), blueBall = createBall(250, 450, 'blue'), redBall = createBall(550, 450, 'red')] },
+{ name: "高い壁を回り込む", build: () => [createWall(400, 580, 800, 40), createWall(400, 380, 20, 360), blueBall = createBall(200, 500, 'blue'), redBall = createBall(600, 500, 'red')] },
+{ name: "段差2段ジャンプ風", build: () => [createWall(200, 500, 300, 20), createWall(600, 400, 300, 20), blueBall = createBall(150, 400, 'blue'), redBall = createBall(650, 300, 'red')] },
+{ name: "低い段差と高い段差", build: () => [createWall(150, 550, 200, 20), createWall(400, 480, 200, 20), createWall(650, 350, 200, 20), blueBall = createBall(100, 450, 'blue'), redBall = createBall(700, 250, 'red')] },
+{ name: "左右で高さ違い", build: () => [createWall(250, 300, 300, 20), createWall(550, 500, 300, 20), blueBall = createBall(200, 200, 'blue'), redBall = createBall(600, 400, 'red')] },
+{ name: "くぼみから救出", build: () => [createWall(200, 500, 200, 20), createWall(100, 420, 20, 180), createWall(300, 420, 20, 180), createWall(600, 500, 200, 20), blueBall = createBall(200, 300, 'blue'), redBall = createBall(600, 400, 'red')] },
+{ name: "深い穴から脱出", build: () => [createWall(400, 550, 200, 20), createWall(300, 400, 20, 320), createWall(500, 400, 20, 320), createWall(150, 300, 200, 20), createWall(650, 300, 200, 20), blueBall = createBall(400, 450, 'blue'), redBall = createBall(150, 200, 'red')] },
+{ name: "浅い穴でバウンド", build: () => [createWall(400, 500, 800, 30), createWall(200, 470, 20, 40), createWall(600, 470, 20, 40), blueBall = createBall(100, 400, 'blue'), redBall = createBall(700, 400, 'red')] },
+// 11-20: 通路と足場
+{ name: "狭い通路を通す", build: () => [createWall(400, 550, 800, 40), createWall(400, 350, 800, 150), blueBall = createBall(100, 480, 'blue'), redBall = createBall(700, 480, 'red')] },
+{ name: "曲がった通路", build: () => [createWall(200, 400, 400, 40), createWall(600, 550, 400, 40), createWall(400, 475, 40, 190), blueBall = createBall(100, 300, 'blue'), redBall = createBall(700, 450, 'red')] },
+{ name: "S字通路", build: () => [createWall(300, 300, 600, 30), createWall(500, 450, 600, 30), blueBall = createBall(100, 200, 'blue'), redBall = createBall(700, 350, 'red')] },
+{ name: "天井が低い通路", build: () => [createWall(400, 550, 800, 20), createWall(400, 400, 800, 20), createWall(400, 475, 20, 130), blueBall = createBall(100, 480, 'blue'), redBall = createBall(700, 480, 'red')] },
+{ name: "通路＋落下コンボ", build: () => [createWall(200, 300, 400, 20), createWall(600, 500, 400, 20), blueBall = createBall(100, 200, 'blue'), redBall = createBall(500, 400, 'red')] },
+{ name: "動かない足場を橋に", build: () => [createWall(100, 400, 100, 20), createWall(400, 400, 50, 20), createWall(700, 400, 100, 20), blueBall = createBall(100, 300, 'blue'), redBall = createBall(700, 300, 'red')] },
+{ name: "足場がズレている", build: () => [createWall(150, 500, 150, 20), createWall(400, 400, 150, 20), createWall(650, 500, 150, 20), blueBall = createBall(150, 400, 'blue'), redBall = createBall(650, 400, 'red')] },
+{ name: "足場2つで連結", build: () => [createWall(100, 300, 100, 20), createWall(300, 400, 50, 20), createWall(500, 400, 50, 20), createWall(700, 300, 100, 20), blueBall = createBall(100, 200, 'blue'), redBall = createBall(700, 200, 'red')] },
+{ name: "小さい足場だけ", build: () => [createWall(200, 450, 60, 20), createWall(400, 450, 60, 20), createWall(600, 450, 60, 20), blueBall = createBall(200, 350, 'blue'), redBall = createBall(600, 350, 'red')] },
+{ name: "足場の隙間を越える", build: () => [createWall(200, 500, 300, 20), createWall(600, 500, 300, 20), blueBall = createBall(250, 400, 'blue'), redBall = createBall(550, 400, 'red')] },
+// 21-30: 距離感・高低差・力学
+{ name: "最初から近い", build: () => [createWall(400, 550, 400, 30), blueBall = createBall(350, 450, 'blue'), redBall = createBall(450, 450, 'red')] },
+{ name: "ちょっと離れてる", build: () => [createWall(400, 550, 600, 30), blueBall = createBall(250, 450, 'blue'), redBall = createBall(550, 450, 'red')] },
+{ name: "めっちゃ遠いけど坂", build: () => [createWall(150, 350, 200, 20, 0.3), createWall(650, 350, 200, 20, -0.3), createWall(400, 550, 200, 20), blueBall = createBall(100, 200, 'blue'), redBall = createBall(700, 200, 'red')] },
+{ name: "高低差が大きい", build: () => [createWall(150, 200, 200, 20), createWall(650, 550, 200, 20), blueBall = createBall(150, 100, 'blue'), redBall = createBall(650, 450, 'red')] },
+{ name: "横移動だけでいける", build: () => [createWall(150, 400, 100, 20), createWall(650, 400, 100, 20), blueBall = createBall(150, 300, 'blue'), redBall = createBall(650, 300, 'red')] },
+{ name: "上から落とす", build: () => [createWall(400, 550, 200, 20), createWall(200, 200, 100, 20), createWall(600, 200, 100, 20), blueBall = createBall(200, 100, 'blue'), redBall = createBall(600, 100, 'red')] },
+{ name: "下から押し上げる", build: () => [createWall(200, 500, 100, 20), createWall(600, 500, 100, 20), createWall(400, 300, 100, 20), blueBall = createBall(200, 400, 'blue'), redBall = createBall(600, 400, 'red')] },
+{ name: "横からぶつける", build: () => [createWall(400, 500, 700, 20), createWall(100, 450, 20, 120), createWall(700, 450, 20, 120), blueBall = createBall(150, 450, 'blue'), redBall = createBall(650, 450, 'red')] },
+{ name: "バウンドさせて合流", build: () => [createWall(400, 550, 800, 20), createWall(200, 400, 20, 100, 0.5), createWall(600, 400, 20, 100, -0.5), blueBall = createBall(100, 200, 'blue'), redBall = createBall(700, 200, 'red')] },
+{ name: "転がし続けるだけ", build: () => [createWall(400, 500, 700, 20), blueBall = createBall(100, 450, 'blue'), redBall = createBall(700, 450, 'red')] },
+
+// 31-40: 壁のバリエーション・スタート位置
+{ name: "壁1枚＋床あり", build: () => [createWall(400, 550, 800, 20), createWall(400, 480, 20, 120), blueBall = createBall(200, 450, 'blue'), redBall = createBall(600, 450, 'red')] },
+{ name: "壁2枚で迷路風", build: () => [createWall(400, 550, 800, 20), createWall(300, 450, 20, 200), createWall(500, 400, 20, 200), blueBall = createBall(150, 450, 'blue'), redBall = createBall(650, 450, 'red')] },
+{ name: "壁3枚でジグザグ", build: () => [createWall(400, 550, 800, 20), createWall(250, 450, 20, 200), createWall(400, 300, 20, 200), createWall(550, 450, 20, 200), blueBall = createBall(100, 450, 'blue'), redBall = createBall(700, 450, 'red')] },
+{ name: "壁＋穴コンボ", build: () => [createWall(200, 550, 400, 20), createWall(600, 550, 400, 20), createWall(400, 450, 20, 150), blueBall = createBall(200, 450, 'blue'), redBall = createBall(600, 450, 'red')] },
+{ name: "壁の隙間をすり抜ける", build: () => [createWall(400, 580, 800, 40), createWall(400, 200, 40, 250), createWall(400, 500, 40, 150), blueBall = createBall(200, 450, 'blue'), redBall = createBall(600, 450, 'red')] },
+{ name: "スタート位置が端", build: () => [createWall(400, 550, 800, 20), blueBall = createBall(50, 450, 'blue'), redBall = createBall(750, 450, 'red')] },
+{ name: "スタートが中央", build: () => [createWall(400, 550, 400, 20), blueBall = createBall(380, 450, 'blue'), redBall = createBall(420, 450, 'red')] },
+{ name: "両方端の逆配置", build: () => [createWall(100, 300, 150, 20), createWall(700, 300, 150, 20), createWall(400, 550, 200, 20), blueBall = createBall(100, 200, 'blue'), redBall = createBall(700, 200, 'red')] },
+{ name: "上下に分離", build: () => [createWall(400, 250, 300, 20), createWall(400, 550, 300, 20), blueBall = createBall(400, 150, 'blue'), redBall = createBall(400, 450, 'red')] },
+{ name: "対角配置", build: () => [createWall(150, 200, 200, 20), createWall(650, 500, 200, 20), blueBall = createBall(150, 100, 'blue'), redBall = createBall(650, 400, 'red')] },
+
+// 41-50: 遊び・スリル・集大成
+{ name: "軽く押せばいける", build: () => [createWall(400, 550, 800, 20, 0.02), blueBall = createBall(300, 450, 'blue'), redBall = createBall(500, 450, 'red')] },
+{ name: "強く押すと失敗しやすい", build: () => [createWall(400, 500, 200, 20), blueBall = createBall(350, 450, 'blue'), redBall = createBall(450, 450, 'red')] },
+{ name: "慎重に運ぶ", build: () => [createWall(200, 300, 100, 20), createWall(400, 400, 100, 20), createWall(600, 500, 100, 20), blueBall = createBall(200, 200, 'blue'), redBall = createBall(600, 400, 'red')] },
+{ name: "一気に転がす", build: () => [createWall(300, 200, 400, 20, 0.4), createWall(600, 500, 300, 20), blueBall = createBall(150, 50, 'blue'), redBall = createBall(650, 400, 'red')] },
+{ name: "タイミング適当でも可", build: () => [createWall(200, 200, 100, 20), createWall(400, 550, 800, 20), blueBall = createBall(200, 100, 'blue'), redBall = createBall(600, 450, 'red')] },
+{ name: "床が広い安心感", build: () => [createWall(400, 500, 800, 100), blueBall = createBall(100, 300, 'blue'), redBall = createBall(700, 300, 'red')] },
+{ name: "床がほぼないスリル", build: () => [createWall(150, 400, 50, 20), createWall(650, 400, 50, 20), blueBall = createBall(150, 300, 'blue'), redBall = createBall(650, 300, 'red')] },
+{ name: "一本道", build: () => [createWall(400, 400, 600, 20), createWall(100, 300, 20, 200), createWall(700, 300, 20, 200), blueBall = createBall(150, 300, 'blue'), redBall = createBall(650, 300, 'red')] },
+{ name: "分岐あり（どっちでも）", build: () => [createWall(400, 200, 100, 20), createWall(400, 500, 300, 20), createWall(200, 350, 100, 20), createWall(600, 350, 100, 20), blueBall = createBall(400, 100, 'blue'), redBall = createBall(400, 400, 'red')] },
+{ name: "最終全部入り", build: () => [createWall(100, 200, 150, 20, 0.1), createWall(400, 350, 100, 20), createWall(700, 500, 150, 20, -0.1), createWall(400, 550, 200, 20), createWall(400, 450, 20, 80), blueBall = createBall(80, 100, 'blue'), redBall = createBall(720, 400, 'red')] }
+];
+
+function init() {
+ engine = Engine.create();
+ render = Render.create({
+ element: document.getElementById('game-container'),
+ engine: engine,
+ options: {
+ width: CONFIG.width,
+ height: CONFIG.height,
+ wireframes: false,
+ background: 'transparent',
+ pixelRatio: window.devicePixelRatio || 1
+}
+});
+
+ runner = Runner.create();
+Runner.run(runner, engine);
+Render.run(render);
+
+ setupEvents();
+ createStageGrid();
+ loadStage(0);
+ handleResize();
+}
+
+function showToast(message) {
+const toast = document.getElementById('toast');
+ toast.innerText = message;
+ toast.style.opacity = '1';
+ setTimeout(() => { toast.style.opacity = '0'; }, 1500);
+}
+
+function loadStage(index) {
+ currentLevel = index;
+ mode = 'normal';
+ isClearing = false;
+ totalLinesDrawn = 0;
+ updateLineCount();
+Composite.clear(engine.world);
+ engine.gravity.y = 1;
+
+const stage = stageData[index];
+Composite.add(engine.world, stage.build());
+
+ document.getElementById('stage-num').innerText = index + 1;
+ document.getElementById('stage-name').innerText = stage.name;
+ document.getElementById('win-modal').classList.remove('active');
+}
+
+function loadRandomStage() {
+ mode = 'random';
+ isClearing = false;
+ totalLinesDrawn = 0;
+ updateLineCount();
+Composite.clear(engine.world);
+ engine.gravity.y = 1;
+
+const bodies = [];
+ blueBall = createBall(Math.random() * 200 + 50, Math.random() * 200 + 100, 'blue');
+ redBall = createBall(Math.random() * 200 + 550, Math.random() * 200 + 100, 'red');
+ bodies.push(blueBall, redBall);
+
+for(let i=0; i<4; i++) {
+const x = Math.random() * 600 + 100;
+const y = Math.random() * 300 + 250; // 下の方に偏らせる
+const w = Math.random() * 150 + 50;
+const angle = (Math.random() - 0.5) * 0.5; // 少しだけ傾ける
+ bodies.push(createWall(x, y, w, 20, angle));
+}
+
+Composite.add(engine.world, bodies);
+ document.getElementById('stage-num').innerText = "∞";
+ document.getElementById('stage-name').innerText = "Chaos Theory";
+ document.getElementById('win-modal').classList.remove('active');
+ document.getElementById('menu-modal').classList.remove('active');
+}
+
+function resetCurrent() {
+if (mode === 'normal') loadStage(currentLevel);
+else loadRandomStage();
+}
+
+function setupEvents() {
+const canvas = render.canvas;
+
+ canvas.addEventListener('pointerdown', e => {
+if(isClearing) return;
+ isDrawing = true;
+ currentPath = [getMousePos(e)];
+});
+
+ window.addEventListener('pointermove', e => {
+if(!isDrawing || isClearing) return;
+const pos = getMousePos(e);
+const lastPos = currentPath[currentPath.length - 1];
+if (!lastPos) return;
+const dist = Vector.magnitude(Vector.sub(pos, lastPos));
+if(dist > 5) {
+ currentPath.push(pos);
+}
+});
+
+ window.addEventListener('pointerup', () => {
+if(!isDrawing) return;
+ finishDrawing();
+});
+
+// 毎フレームの更新イベントでボールの位置を全方位チェック
+Events.on(engine, 'afterUpdate', () => {
+if (isClearing) return;
+const isOutOfBounds = (ball) => {
+if (!ball) return false;
+const pos = ball.position;
+return pos.y > CONFIG.bounds.maxY ||
+ pos.x < CONFIG.bounds.minX ||
+ pos.x > CONFIG.bounds.maxX;
+};
+
+if (isOutOfBounds(blueBall) || isOutOfBounds(redBall)) {
+ isClearing = true;
+ showToast("コースアウト！リセットします");
+ setTimeout(resetCurrent, 800);
+}
+});
+
+Events.on(engine, 'collisionStart', event => {
+if(isClearing) return;
+for(let pair of event.pairs) {
+if((pair.bodyA.label === 'blueBall' && pair.bodyB.label === 'redBall') ||
+(pair.bodyB.label === 'blueBall' && pair.bodyA.label === 'redBall')) {
+ onWin();
+}
+}
+});
+
+Events.on(render, 'afterRender', () => {
+if(!isDrawing || currentPath.length < 2) return;
+const ctx = render.context;
+ ctx.beginPath();
+ ctx.moveTo(currentPath[0].x, currentPath[0].y);
+for(let p of currentPath) ctx.lineTo(p.x, p.y);
+ ctx.strokeStyle = CONFIG.colors.ink;
+ ctx.lineWidth = 10;
+ ctx.lineCap = 'round';
+ ctx.lineJoin = 'round';
+ ctx.stroke();
+});
+
+ document.getElementById('reset-btn').onclick = resetCurrent;
+ document.getElementById('next-btn').onclick = () => {
+if(mode === 'normal') {
+const next = (currentLevel + 1) % stageData.length;
+ loadStage(next);
+} else {
+ loadRandomStage();
+}
+};
+ document.getElementById('menu-btn').onclick = () => document.getElementById('menu-modal').classList.add('active');
+ document.getElementById('close-menu').onclick = () => document.getElementById('menu-modal').classList.remove('active');
+ document.getElementById('random-mode-toggle').onclick = loadRandomStage;
+
+ window.addEventListener('resize
